@@ -14,6 +14,15 @@ const STATUS_LABELS = {
   hired: '已录用',
   rejected: '已拒绝',
   closed: '已关闭',
+  student_confirmed: '学生已确认',
+  enterprise_confirmed: '企业已确认',
+};
+
+const CONFIRM_TYPE_LABELS = {
+  enterprise_offer: '企业发Offer',
+  student_accept: '学生接受Offer',
+  enterprise_final: '企业最终确认',
+  student_final: '学生最终确认',
 };
 
 const COLLEGE_STATUS_LABELS = {
@@ -321,6 +330,7 @@ async function showMyApplications() {
                   <td>${statusBadge(a.status)}</td>
                   <td>${a.created_at || '-'}</td>
                   <td class="actions-cell">
+                    <button class="btn btn-outline btn-sm" onclick="showApplicationDetail('${a.id}')">详情</button>
                     ${isMentor && a.status === 'pending' ? `<button class="btn btn-primary btn-sm" onclick="updateAppStatus('${a.id}','enterprise_reviewing')">开始审核</button>` : ''}
                     ${isMentor && a.status === 'enterprise_reviewing' ? `
                       <button class="btn btn-success btn-sm" onclick="updateAppStatus('${a.id}','hired')">录用</button>
@@ -347,6 +357,111 @@ async function updateAppStatus(appId, status) {
     showMyApplications();
   } catch (e) {
     alert('操作失败: ' + e.message);
+  }
+}
+
+function renderTimeline(timeline) {
+  if (!timeline || timeline.length === 0) {
+    return '<div class="empty-state">暂无时间线记录</div>';
+  }
+
+  return `
+    <div class="timeline">
+      ${timeline.map((item, idx) => `
+        <div class="timeline-item">
+          <div class="timeline-dot ${item.type}"></div>
+          <div class="timeline-content">
+            <div class="timeline-header">
+              <span class="timeline-time">${item.time || '-'}</span>
+              <span class="timeline-operator">${item.operator || '-'}</span>
+            </div>
+            <div class="timeline-body">
+              ${item.type === 'status' 
+                ? `<span class="timeline-label">状态变更：</span>${statusBadge(item.status)}`
+                : `<span class="timeline-label">二次确认：</span><span class="confirm-badge">${CONFIRM_TYPE_LABELS[item.confirm_type] || item.confirm_type}</span>`
+              }
+            </div>
+            ${item.remark ? `<div class="timeline-remark">备注：${item.remark}</div>` : ''}
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+async function showApplicationDetail(appId) {
+  const data = await api(`/api/applications/${appId}`);
+  const main = document.getElementById('main-content');
+  const isStudent = currentUser.role === 'student';
+  const isMentor = currentUser.role === 'enterprise_mentor';
+
+  const canStudentConfirm = isStudent && data.student_id === currentUser.id && 
+    (data.status === 'hired' || data.status === 'enterprise_confirmed');
+  
+  const canEnterpriseConfirm = isMentor && 
+    (data.status === 'hired' || data.status === 'student_confirmed');
+
+  const hasStudentFinal = data.confirmations?.some(c => c.confirm_type === 'student_final');
+  const hasEnterpriseFinal = data.confirmations?.some(c => c.confirm_type === 'enterprise_final');
+
+  main.innerHTML = `
+    <div class="page-header">
+      <h1>投递详情</h1>
+      <button class="btn btn-outline" onclick="showMyApplications()">返回列表</button>
+    </div>
+    
+    <div class="card">
+      <div class="detail-grid">
+        <dt>岗位</dt><dd>${data.position_title}</dd>
+        <dt>企业</dt><dd>${data.company_name}</dd>
+        <dt>学生</dt><dd>${data.student_name}</dd>
+        <dt>投递状态</dt><dd>${statusBadge(data.status)}</dd>
+        <dt>简历审核</dt><dd>${statusBadge(data.resume_college_status, 'resume')}</dd>
+        <dt>投递时间</dt><dd>${data.created_at || '-'}</dd>
+      </div>
+    </div>
+
+    ${data.resume_content ? `
+    <div class="card">
+      <div class="card-header">简历内容</div>
+      <div style="white-space:pre-wrap">${data.resume_content}</div>
+    </div>
+    ` : ''}
+
+    <div class="card">
+      <div class="card-header">二次确认</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        ${isStudent && canStudentConfirm && !hasStudentFinal ? `
+          <button class="btn btn-success" onclick="doConfirm('${data.id}', 'student_final')">学生最终确认入职</button>
+        ` : ''}
+        ${isMentor && canEnterpriseConfirm && !hasEnterpriseFinal ? `
+          <button class="btn btn-success" onclick="doConfirm('${data.id}', 'enterprise_final')">企业最终确认录用</button>
+        ` : ''}
+        ${hasStudentFinal ? '<span class="confirm-badge success">学生已最终确认</span>' : ''}
+        ${hasEnterpriseFinal ? '<span class="confirm-badge success">企业已最终确认</span>' : ''}
+        ${!canStudentConfirm && !canEnterpriseConfirm && !hasStudentFinal && !hasEnterpriseFinal ? 
+          '<span style="color:var(--text-secondary);font-size:13px">需等待录用后才能进行二次确认</span>' : ''}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">时间线</div>
+      ${renderTimeline(data.timeline)}
+    </div>
+  `;
+}
+
+async function doConfirm(appId, confirmType) {
+  const remark = prompt('请输入备注（可选）：');
+  try {
+    await api(`/api/applications/${appId}/confirm`, {
+      method: 'POST',
+      body: JSON.stringify({ confirm_type: confirmType, remark: remark || '' }),
+    });
+    alert('确认成功！');
+    showApplicationDetail(appId);
+  } catch (e) {
+    alert('确认失败: ' + e.message);
   }
 }
 

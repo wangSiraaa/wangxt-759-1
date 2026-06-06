@@ -122,12 +122,34 @@ function initSchema() {
       student_id    TEXT NOT NULL,
       position_id   TEXT NOT NULL,
       resume_id     TEXT NOT NULL,
-      status        TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','college_approved','enterprise_reviewing','hired','rejected','closed')),
+      status        TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','college_approved','enterprise_reviewing','hired','rejected','closed','student_confirmed','enterprise_confirmed')),
       created_at    TEXT DEFAULT (datetime('now')),
       updated_at    TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (student_id) REFERENCES users(id),
       FOREIGN KEY (position_id) REFERENCES positions(id),
       FOREIGN KEY (resume_id) REFERENCES resumes(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS application_status_history (
+      id            TEXT PRIMARY KEY,
+      application_id TEXT NOT NULL,
+      status        TEXT NOT NULL,
+      changed_by    TEXT,
+      changed_at    TEXT DEFAULT (datetime('now')),
+      remark        TEXT,
+      FOREIGN KEY (application_id) REFERENCES applications(id) ON DELETE CASCADE,
+      FOREIGN KEY (changed_by) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS confirmations (
+      id            TEXT PRIMARY KEY,
+      application_id TEXT NOT NULL,
+      confirm_type  TEXT NOT NULL CHECK(confirm_type IN ('enterprise_offer','student_accept','enterprise_final','student_final')),
+      confirmed_by  TEXT NOT NULL,
+      confirmed_at  TEXT DEFAULT (datetime('now')),
+      remark        TEXT,
+      FOREIGN KEY (application_id) REFERENCES applications(id) ON DELETE CASCADE,
+      FOREIGN KEY (confirmed_by) REFERENCES users(id)
     );
   `);
   saveDb();

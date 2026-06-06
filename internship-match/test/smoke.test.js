@@ -17,10 +17,13 @@ function api(agent) {
     reviewResume: (id, status) =>
       agent.patch(`/api/resumes/${id}/review`).send({ college_status: status }),
     getApplications: () => agent.get('/api/applications'),
+    getApplication: (id) => agent.get(`/api/applications/${id}`),
     apply: (position_id) =>
       agent.post('/api/applications').send({ position_id }),
     updateAppStatus: (id, status) =>
       agent.patch(`/api/applications/${id}/status`).send({ status }),
+    confirm: (id, confirm_type, remark) =>
+      agent.post(`/api/applications/${id}/confirm`).send({ confirm_type, remark }),
   };
 }
 
@@ -174,5 +177,86 @@ describe('校企实习岗位撮合 - Smoke Test', () => {
 
     const appsRes = await api(a.admin).get('/api/admin/all-applications');
     expect(appsRes.status).toBe(200);
+  });
+
+  describe('二次确认功能测试', () => {
+    test('企业录用后学生可以最终确认入职', async () => {
+      const createRes = await api(a.mentor1).createPosition({
+        title: '二次确认测试_' + uuid().slice(0, 8),
+        description: '测试二次确认流程',
+        capacity: 1,
+      });
+      expect(createRes.status).toBe(201);
+      const posId = createRes.body.id;
+
+      const applyRes = await api(a.student1).apply(posId);
+      expect(applyRes.status).toBe(201);
+      const appId = applyRes.body.id;
+
+      await api(a.mentor1).updateAppStatus(appId, 'enterprise_reviewing');
+      const hireRes = await api(a.mentor1).updateAppStatus(appId, 'hired');
+      expect(hireRes.status).toBe(200);
+      expect(hireRes.body.status).toBe('hired');
+
+      const confirmRes = await api(a.student1).confirm(appId, 'student_final', '确认入职');
+      expect(confirmRes.status).toBe(201);
+      expect(confirmRes.body.length).toBeGreaterThan(0);
+
+      const detailRes = await api(a.student1).getApplication(appId);
+      expect(detailRes.status).toBe(200);
+      expect(detailRes.body.status).toBe('student_confirmed');
+      expect(detailRes.body.timeline).toBeDefined();
+      expect(detailRes.body.timeline.length).toBeGreaterThan(0);
+      expect(detailRes.body.confirmations.length).toBeGreaterThan(0);
+    });
+
+    test('【失败用例】未被录用的学生不能进行二次确认', async () => {
+      const createRes = await api(a.mentor1).createPosition({
+        title: '失败用例测试_' + uuid().slice(0, 8),
+        description: '测试失败场景',
+        capacity: 1,
+      });
+      expect(createRes.status).toBe(201);
+      const posId = createRes.body.id;
+
+      const applyRes = await api(a.student1).apply(posId);
+      expect(applyRes.status).toBe(201);
+      const appId = applyRes.body.id;
+
+      const confirmRes = await api(a.student1).confirm(appId, 'student_final', '试图提前确认');
+      expect(confirmRes.status).toBe(400);
+      expect(confirmRes.body.error).toContain('只有已录用');
+    });
+
+    test('企业和学生双方完成二次确认后详情页时间线正确展示', async () => {
+      const createRes = await api(a.mentor1).createPosition({
+        title: '双方确认测试_' + uuid().slice(0, 8),
+        description: '测试双方确认和时间线',
+        capacity: 1,
+      });
+      expect(createRes.status).toBe(201);
+      const posId = createRes.body.id;
+
+      const applyRes = await api(a.student1).apply(posId);
+      expect(applyRes.status).toBe(201);
+      const appId = applyRes.body.id;
+
+      await api(a.mentor1).updateAppStatus(appId, 'enterprise_reviewing');
+      await api(a.mentor1).updateAppStatus(appId, 'hired');
+
+      await api(a.student1).confirm(appId, 'student_final', '学生确认入职');
+      await api(a.mentor1).confirm(appId, 'enterprise_final', '企业确认录用');
+
+      const detailRes = await api(a.student1).getApplication(appId);
+      expect(detailRes.status).toBe(200);
+      
+      const timeline = detailRes.body.timeline;
+      expect(timeline.length).toBeGreaterThanOrEqual(4);
+      
+      const statusEvents = timeline.filter(t => t.type === 'status');
+      const confirmEvents = timeline.filter(t => t.type === 'confirmation');
+      expect(statusEvents.length).toBeGreaterThan(0);
+      expect(confirmEvents.length).toBe(2);
+    });
   });
 });
